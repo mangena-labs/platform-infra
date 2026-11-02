@@ -23,7 +23,7 @@ locals {
 }
 
 resource "azurerm_role_assignment" "env" {
-  for_each             = { for k, v in local.env_grants : k => v if v.scope != "" } # skips the hub grant when there's no hub
+  for_each             = { for k, v in local.env_grants : k => v if var.private_networking || !endswith(k, "-hub") } # skips the hub grant when there's no hub
   principal_id         = each.value.p
   principal_type       = "ServicePrincipal"
   role_definition_name = each.value.role
