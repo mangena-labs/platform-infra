@@ -75,15 +75,15 @@ az lock create -n do-not-delete -g "$STATE_RG" --subscription "$SHARED_SUB" --lo
 # ---------- 4. Pipeline identities and their OIDC trust ----------
 az group create -n "$ID_RG" -l "$LOCATION" --subscription "$SHARED_SUB" -o none
 
-mi_create id-gh-shared-plan;     fed id-gh-shared-plan pr   "$INFRA:pull_request"
+mi_create id-gh-shared-plan;     fed id-gh-shared-plan pull-request "$INFRA:pull_request"
                                  fed id-gh-shared-plan main "$INFRA:ref:refs/heads/main"
 mi_create id-gh-shared-apply;    fed id-gh-shared-apply env "$INFRA:environment:shared"
 mi_create id-gh-github-settings; fed id-gh-github-settings env "$INFRA:environment:github-settings"
-                                 fed id-gh-github-settings pr  "$INFRA:pull_request"
+                                 fed id-gh-github-settings pull-request "$INFRA:pull_request"
                                  fed id-gh-github-settings main "$INFRA:ref:refs/heads/main"
 mi_create id-gh-acr-push;        fed id-gh-acr-push main "$APP:ref:refs/heads/main"
 for ENV in "${ENVS[@]}"; do
-  mi_create "id-gh-infra-plan-$ENV";  fed "id-gh-infra-plan-$ENV" pr   "$INFRA:pull_request"
+  mi_create "id-gh-infra-plan-$ENV";  fed "id-gh-infra-plan-$ENV" pull-request "$INFRA:pull_request"
                                       fed "id-gh-infra-plan-$ENV" main "$INFRA:ref:refs/heads/main"
   mi_create "id-gh-infra-apply-$ENV"; fed "id-gh-infra-apply-$ENV" env "$INFRA:environment:$ENV"
   mi_create "id-gh-deploy-$ENV";      fed "id-gh-deploy-$ENV" env "$APP:environment:$ENV"
@@ -148,7 +148,6 @@ for SUB in "${ENV_SUBS[@]}"; do
       \"Microsoft.ContainerService/managedClusters/services/*\",
       \"Microsoft.ContainerService/managedClusters/serviceaccounts/*\",
       \"Microsoft.ContainerService/managedClusters/pods/read\",
-      \"Microsoft.ContainerService/managedClusters/pods/log/read\",
       \"Microsoft.ContainerService/managedClusters/events/read\",
       \"Microsoft.ContainerService/managedClusters/apps/deployments/*\",
       \"Microsoft.ContainerService/managedClusters/apps/replicasets/read\",
@@ -156,7 +155,7 @@ for SUB in "${ENV_SUBS[@]}"; do
       \"Microsoft.ContainerService/managedClusters/autoscaling/horizontalpodautoscalers/*\",
       \"Microsoft.ContainerService/managedClusters/policy/poddisruptionbudgets/*\",
       \"Microsoft.ContainerService/managedClusters/networking.k8s.io/networkpolicies/*\",
-      \"Microsoft.ContainerService/managedClusters/gateway.networking.k8s.io/httproutes/*\"
+      \"Microsoft.ContainerService/managedClusters/customresources/*\"
     ],
     \"NotDataActions\": [],
     \"AssignableScopes\": [\"/subscriptions/$SUB\"]
