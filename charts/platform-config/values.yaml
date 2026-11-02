@@ -1,0 +1,17 @@
+# values.yaml: defaults; Terraform passes the real values
+originHost: ""
+frontDoorOnly: true          # false (learning profile): no Front Door, so the gateway accepts internet traffic
+gateway:
+  replicas: 2
+  publicIpName: ""
+  resourceGroup: ""
+acme:
+  email: ""
+  server: https://acme-v02.api.letsencrypt.org/directory
+dns:
+  zoneName: ""
+  resourceGroup: ""
+  subscriptionId: ""
+certManager:
+  clientId: ""
+appNamespaces: []

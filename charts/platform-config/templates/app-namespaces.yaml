@@ -1,0 +1,47 @@
+# templates/app-namespaces.yaml: one block per app namespace
+{{- range .Values.appNamespaces }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .name }}
+  labels:
+    gateway-access: "true"                                # may attach routes to the shared Gateway
+    pod-security.kubernetes.io/enforce: restricted        # Kubernetes refuses unsafe pods here
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ .name }}-quota
+  namespace: {{ .name }}
+spec:
+  hard:
+    requests.cpu: {{ .quota.requests_cpu | quote }}
+    requests.memory: {{ .quota.requests_memory | quote }}
+    limits.memory: {{ .quota.limits_memory | quote }}
+    pods: {{ .quota.pods | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ .name }}-defaults
+  namespace: {{ .name }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        memory: 256Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ .name }}
+spec:
+  podSelector: {}                                         # every pod in the namespace…
+  policyTypes: [Ingress]                                  # …accepts NO incoming traffic unless another policy allows it
+{{- end }}

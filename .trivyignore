@@ -1,0 +1,3 @@
+# .trivyignore: findings we accept on purpose. One ID per line, each with a comment saying why.
+# Learning profile: add IDs reported by the validate job here with the reason
+# "learning profile: Entra-only public endpoint" (Build checklist step 9).

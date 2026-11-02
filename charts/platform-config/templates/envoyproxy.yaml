@@ -1,0 +1,24 @@
+# templates/envoyproxy.yaml: HOW the Envoy proxies run and how they're exposed
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: edge-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: {{ .Values.gateway.replicas }}
+      envoyPDB:
+        minAvailable: 1                     # never take all proxies down during node upgrades
+      envoyService:
+        type: LoadBalancer
+        annotations:
+          # use the fixed public IP Terraform created in the environment's resource group
+          service.beta.kubernetes.io/azure-load-balancer-resource-group: {{ .Values.gateway.resourceGroup | quote }}
+          service.beta.kubernetes.io/azure-pip-name: {{ .Values.gateway.publicIpName | quote }}
+          {{- if .Values.frontDoorOnly }}
+          # only Azure Front Door's addresses may connect (full design)
+          service.beta.kubernetes.io/azure-allowed-service-tags: "AzureFrontDoor.Backend"
+          {{- end }}

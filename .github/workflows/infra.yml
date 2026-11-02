@@ -1,0 +1,175 @@
+name: infra
+
+on:
+  pull_request:
+    branches: [main]                 # no "paths" filter: required checks must ALWAYS run
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - name: Validate every stack
+        run: |
+          for d in stacks/*/; do
+            terraform -chdir="$d" init -backend=false -input=false
+            terraform -chdir="$d" validate
+          done
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+      - name: Lint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}          # avoids download rate limits
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          tflint --recursive --config "$PWD/.tflint.hcl"
+      - name: Security scan of Terraform and charts
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore                  # accepted findings, each with a reason (Build checklist step 9)
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1                            # same Helm as every laptop
+      - run: helm lint charts/platform-config
+
+  shared:
+    needs: validate
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: shared
+      environment: shared
+      subscription_id: ${{ vars.SHARED_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.SHARED_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.SHARED_APPLY_CLIENT_ID }}
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  dev-platform:
+    needs: shared
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: platform
+      environment: dev
+      subscription_id: ${{ vars.NONPROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.DEV_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.DEV_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  dev-addons:
+    needs: dev-platform
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: addons
+      environment: dev
+      subscription_id: ${{ vars.NONPROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.DEV_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.DEV_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  staging-platform:
+    needs: dev-addons
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: platform
+      environment: staging
+      subscription_id: ${{ vars.NONPROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.STAGING_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.STAGING_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  staging-addons:
+    needs: staging-platform
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: addons
+      environment: staging
+      subscription_id: ${{ vars.NONPROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.STAGING_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.STAGING_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  prod-platform:
+    needs: staging-addons
+    if: vars.PROD_SUBSCRIPTION_ID != ''          # skipped until prod exists (learning profile)
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: platform
+      environment: prod
+      subscription_id: ${{ vars.PROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.PROD_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.PROD_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  prod-addons:
+    needs: prod-platform
+    if: vars.PROD_SUBSCRIPTION_ID != ''          # skipped until prod exists (learning profile)
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: addons
+      environment: prod
+      subscription_id: ${{ vars.PROD_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.PROD_PLAN_CLIENT_ID }}
+      apply_client_id: ${{ vars.PROD_APPLY_CLIENT_ID }}
+      private_network: true
+      apply: ${{ github.event_name != 'pull_request' }}
+
+  github:
+    needs: [staging-addons, prod-addons]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}   # still runs when prod is skipped
+    uses: ./.github/workflows/_terraform.yml
+    secrets: inherit
+    with:
+      stack: github
+      environment: github-settings
+      subscription_id: ${{ vars.SHARED_SUBSCRIPTION_ID }}
+      plan_client_id: ${{ vars.GH_SETTINGS_CLIENT_ID }}
+      apply_client_id: ${{ vars.GH_SETTINGS_CLIENT_ID }}
+      apply: ${{ github.event_name != 'pull_request' }}
+      publish_app_variables: ${{ vars.PUBLISH_APP_VARIABLES == 'true' }}   # false until the environments exist
+
+  plan-gate:                         # the ONE required check for this repo (plus validate)
+    if: always()
+    needs: [validate, shared, dev-platform, dev-addons, staging-platform, staging-addons,
+            prod-platform, prod-addons, github]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every stack planned (and applied) successfully
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          if [[ "$RESULTS" == *failure* || "$RESULTS" == *cancelled* ]]; then exit 1; fi
