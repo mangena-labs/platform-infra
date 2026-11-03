@@ -29,8 +29,11 @@ mapfile -t ENV_SUBS < <(printf '%s\n' "${ENV_SUB[@]}" | sort -u)                
 mapfile -t ALL_SUBS < <(printf '%s\n' "$SHARED_SUB" "${ENV_SUB[@]}" | sort -u)   # every subscription, once
 ENABLE_DEFENDER="${ENABLE_DEFENDER:-false}"   # Defender for Containers is billed per vCore: true in the full design
 PRIVATE_NETWORKING="${PRIVATE_NETWORKING:-false}"   # true = private-network runners (paid GitHub Team plan): full design
-INFRA="repo:$GH_ORG/$INFRA_REPO"
-APP="repo:$GH_ORG/$APP_REPO"
+# GitHub's OIDC subject names the org and repo WITH their numeric IDs, e.g.
+# repo:mangena-labs@350834519/platform-infra@1441224801:pull_request
+OWNER_ID=$(gh api "orgs/$GH_ORG" --jq .id)
+INFRA="repo:$GH_ORG@$OWNER_ID/$INFRA_REPO@$(gh api "repos/$GH_ORG/$INFRA_REPO" --jq .id)"
+APP="repo:$GH_ORG@$OWNER_ID/$APP_REPO@$(gh api "repos/$GH_ORG/$APP_REPO" --jq .id)"
 
 # ---------- helpers ----------
 mi_create()    { az identity create -g "$ID_RG" -n "$1" -l "$LOCATION" --subscription "$SHARED_SUB" -o none; }
