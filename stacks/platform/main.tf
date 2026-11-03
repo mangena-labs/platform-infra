@@ -64,6 +64,7 @@ module "aks" {
   user_vm_size               = var.user_vm_size
   user_min_count             = var.user_min_count
   user_max_count             = var.user_max_count
+  zones                      = var.aks_zones
   log_analytics_workspace_id = module.monitoring.workspace_id
   tags                       = local.tags
 }

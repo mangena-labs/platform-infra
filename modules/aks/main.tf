@@ -29,7 +29,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     name                         = "system"
     vm_size                      = var.system_vm_size
     vnet_subnet_id               = var.subnet_id
-    zones                        = ["1", "2", "3"]
+    zones                        = length(var.zones) > 0 ? var.zones : null
     auto_scaling_enabled         = true
     min_count                    = var.system_min_count
     max_count                    = var.system_max_count
@@ -96,7 +96,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "apps" {
   mode                  = "User"
   vm_size               = var.user_vm_size
   vnet_subnet_id        = var.subnet_id
-  zones                 = ["1", "2", "3"]
+  zones                 = length(var.zones) > 0 ? var.zones : null
   auto_scaling_enabled  = true
   min_count             = var.user_min_count
   max_count             = var.user_max_count

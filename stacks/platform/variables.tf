@@ -25,6 +25,10 @@ variable "system_vm_size" {
   type    = string
   default = "Standard_D4ds_v5"
 }
+variable "aks_zones" {
+  type    = list(string)
+  default = ["1", "2", "3"] # learning profile: [] in dev/staging tfvars
+}
 variable "system_min_count" { type = number }
 variable "system_max_count" { type = number }
 variable "user_vm_size" {
