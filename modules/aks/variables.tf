@@ -15,3 +15,8 @@ variable "user_min_count" { type = number }
 variable "user_max_count" { type = number }
 variable "log_analytics_workspace_id" { type = string }
 variable "tags" { type = map(string) }
+variable "zones" {
+  type        = list(string)
+  default     = ["1", "2", "3"]
+  description = "Availability zones for both node pools; [] = no zones (when the VM size or subscription has none in the region)."
+}
