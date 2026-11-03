@@ -1,0 +1,62 @@
+name: drift
+
+on:
+  schedule:
+    - cron: "0 1 * * *"               # 03:00 Johannesburg time
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  drift:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { stack: shared,   env: shared,  sub: SHARED_SUBSCRIPTION_ID,  client: SHARED_PLAN_CLIENT_ID,  private: false }
+          - { stack: platform, env: dev,     sub: NONPROD_SUBSCRIPTION_ID, client: DEV_PLAN_CLIENT_ID,     private: true }
+          - { stack: platform, env: staging, sub: NONPROD_SUBSCRIPTION_ID, client: STAGING_PLAN_CLIENT_ID, private: true }
+          - { stack: platform, env: prod,    sub: PROD_SUBSCRIPTION_ID,    client: PROD_PLAN_CLIENT_ID,    private: true }
+    runs-on: ${{ matrix.private && vars.PRIVATE_RUNNERS == 'true' && fromJSON('{"group":"azure-private"}') || 'ubuntu-24.04' }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars[matrix.client] }}
+      ARM_SUBSCRIPTION_ID: ${{ vars[matrix.sub] }}
+      TF_VAR_subscription_id: ${{ vars[matrix.sub] }}
+      TF_VAR_shared_subscription_id: ${{ vars.SHARED_SUBSCRIPTION_ID }}
+      TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      STACK: ${{ matrix.stack }}
+      ENVIRONMENT: ${{ matrix.env }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+      - name: Check for drift
+        working-directory: stacks/${{ matrix.stack }}
+        run: |
+          if [[ -z "$ARM_SUBSCRIPTION_ID" ]]; then echo "$ENVIRONMENT isn't built (learning profile); skipping"; exit 0; fi
+          ARGS=""
+          if [[ "$STACK" == "platform" ]]; then
+            terraform init -input=false -backend-config="../../environments/$ENVIRONMENT/platform.backend.hcl"
+            ARGS="-var-file=../../environments/$ENVIRONMENT/platform.tfvars"
+          else
+            terraform init -input=false
+          fi
+          set +e
+          terraform plan -input=false -lock=false -detailed-exitcode $ARGS > plan.txt
+          code=$?
+          set -e
+          if [[ $code -eq 2 ]]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --label drift \
+              --title "Drift detected: $STACK / $ENVIRONMENT" \
+              --body "Someone changed Azure outside Terraform. See run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            exit 1
+          fi
+          exit $code

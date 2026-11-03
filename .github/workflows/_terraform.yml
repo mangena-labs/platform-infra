@@ -1,0 +1,185 @@
+name: terraform-stack
+
+on:
+  workflow_call:
+    inputs:
+      stack:                 { type: string,  required: true }   # shared | platform | addons | github
+      environment:           { type: string,  required: true }   # shared | dev | staging | prod | github-settings
+      subscription_id:       { type: string,  required: true }
+      plan_client_id:        { type: string,  required: true }
+      apply_client_id:       { type: string,  required: true }
+      private_network:       { type: boolean, default: false }   # true = run on the hub runners
+      apply:                 { type: boolean, default: false }
+      publish_app_variables: { type: boolean, default: true }
+
+env:
+  TF_VERSION: "1.17.1"
+  TF_IN_AUTOMATION: "true"
+  ARM_USE_OIDC: "true"                                   # Terraform logs in with the GitHub OIDC token
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
+  TF_VAR_subscription_id: ${{ inputs.subscription_id }}
+  TF_VAR_shared_subscription_id: ${{ vars.SHARED_SUBSCRIPTION_ID }}
+  TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+  TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+  TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+  TF_VAR_publish_app_variables: ${{ inputs.publish_app_variables }}
+  STACK: ${{ inputs.stack }}
+  ENVIRONMENT: ${{ inputs.environment }}
+
+jobs:
+  plan:
+    if: inputs.stack != 'addons'          # see the note on add-ons below
+    runs-on: ${{ inputs.private_network && vars.PRIVATE_RUNNERS == 'true' && fromJSON('{"group":"azure-private"}') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write                     # needed to request the OIDC token
+      pull-requests: write                # needed to comment the plan
+    env:
+      ARM_CLIENT_ID: ${{ inputs.plan_client_id }}       # READ-ONLY identity
+    defaults:
+      run:
+        working-directory: stacks/${{ inputs.stack }}
+    outputs:
+      changes: ${{ steps.plan.outputs.exitcode == '2' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Select this environment's files
+        run: |
+          if [[ "$STACK" == "platform" || "$STACK" == "addons" ]]; then
+            echo "BACKEND_ARGS=-backend-config=../../environments/$ENVIRONMENT/$STACK.backend.hcl" >> "$GITHUB_ENV"
+            echo "VAR_ARGS=-var-file=../../environments/$ENVIRONMENT/$STACK.tfvars" >> "$GITHUB_ENV"
+          fi
+
+      - run: terraform init -input=false $BACKEND_ARGS
+
+      - name: Plan
+        id: plan
+        env:
+          TF_VAR_github_app_pem: ${{ inputs.stack == 'github' && secrets.GH_APP_PRIVATE_KEY || '' }}
+        run: |
+          set +e
+          terraform plan -input=false -lock-timeout=10m -detailed-exitcode $VAR_ARGS -out=tfplan
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"     # 0 = no changes, 1 = error, 2 = changes
+          if [[ $code -eq 1 ]]; then exit 1; fi
+          terraform show -no-color tfplan > plan.txt
+          { echo "### Plan: $STACK / $ENVIRONMENT"; echo '```'; head -c 60000 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the plan on the PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true               # e.g. Dependabot PRs get a read-only token; the plan is in the job summary anyway
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PLAN_FILE: stacks/${{ inputs.stack }}/plan.txt
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync(process.env.PLAN_FILE, 'utf8').slice(0, 60000);
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `### Plan: ${process.env.STACK} / ${process.env.ENVIRONMENT}\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>`
+            });
+
+      - name: Keep the exact plan for the apply job
+        if: inputs.apply && steps.plan.outputs.exitcode == '2'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tfplan-${{ inputs.stack }}-${{ inputs.environment }}
+          path: stacks/${{ inputs.stack }}/tfplan
+          retention-days: 1                   # plans can contain secret values
+
+  apply:
+    needs: plan
+    if: ${{ !cancelled() && inputs.apply && needs.plan.result != 'failure' && (inputs.stack == 'addons' || needs.plan.outputs.changes == 'true') }}
+    runs-on: ${{ inputs.private_network && vars.PRIVATE_RUNNERS == 'true' && fromJSON('{"group":"azure-private"}') || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}    # prod / shared / github-settings wait here for approval
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: tf-${{ inputs.stack }}-${{ inputs.environment }}
+      cancel-in-progress: false               # never kill an apply halfway
+    env:
+      ARM_CLIENT_ID: ${{ inputs.apply_client_id }}      # WRITE identity, only usable from this environment
+    defaults:
+      run:
+        working-directory: stacks/${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Select this environment's files
+        run: |
+          if [[ "$STACK" == "platform" || "$STACK" == "addons" ]]; then
+            echo "BACKEND_ARGS=-backend-config=../../environments/$ENVIRONMENT/$STACK.backend.hcl" >> "$GITHUB_ENV"
+            echo "VAR_ARGS=-var-file=../../environments/$ENVIRONMENT/$STACK.tfvars" >> "$GITHUB_ENV"
+          fi
+
+      - name: Azure CLI login (used by kubelogin and sqlcmd)
+        if: inputs.stack == 'platform' || inputs.stack == 'addons'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ inputs.apply_client_id }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.subscription_id }}
+
+      - name: Install kubelogin
+        if: inputs.stack == 'addons'
+        run: sudo az aks install-cli
+
+      - run: terraform init -input=false $BACKEND_ARGS
+
+      - name: Download the reviewed plan
+        if: inputs.stack != 'addons'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tfplan-${{ inputs.stack }}-${{ inputs.environment }}
+          path: stacks/${{ inputs.stack }}
+
+      - name: Apply
+        env:
+          TF_VAR_github_app_pem: ${{ inputs.stack == 'github' && secrets.GH_APP_PRIVATE_KEY || '' }}
+        run: |
+          if [[ "$STACK" == "addons" ]]; then
+            terraform plan -input=false -lock-timeout=10m $VAR_ARGS -out=tfplan
+            { echo "### Plan: addons / $ENVIRONMENT"; echo '```'; terraform show -no-color tfplan | head -c 60000; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          terraform apply -input=false -lock-timeout=10m tfplan
+
+      - name: Give the app identities database access
+        if: inputs.stack == 'platform'
+        run: |
+          curl -sSL https://github.com/microsoft/go-sqlcmd/releases/latest/download/sqlcmd-linux-amd64.tar.bz2 \
+            | sudo tar -xj -C /usr/local/bin sqlcmd
+          OUT=$(terraform output -json)
+          if [[ "${{ vars.PRIVATE_RUNNERS }}" != "true" ]]; then
+            # Learning profile: SQL is reachable but its firewall is closed. Open it for THIS runner's
+            # address only, and close it again however the step ends.
+            RG=$(jq -r .resource_group_name.value <<<"$OUT"); SRV=$(jq -r .sql_server_name.value <<<"$OUT")
+            IP=$(curl -fsS https://api.ipify.org); RULE="gh-run-$GITHUB_RUN_ID"
+            az sql server firewall-rule create -g "$RG" -s "$SRV" -n "$RULE" \
+              --start-ip-address "$IP" --end-ip-address "$IP" -o none
+            trap 'az sql server firewall-rule delete -g "$RG" -s "$SRV" -n "$RULE" -o none' EXIT
+            sleep 30                                      # firewall changes take a few seconds to apply
+          fi
+          sqlcmd -S "$(jq -r .sql_server_fqdn.value <<<"$OUT")" \
+                 -d "$(jq -r .sql_database_name.value <<<"$OUT")" \
+                 --authentication-method ActiveDirectoryDefault \
+                 -v ApiName="$(jq -r .api_identity_name.value <<<"$OUT")" \
+                 -v ApiClientId="$(jq -r .api_client_id.value <<<"$OUT")" \
+                 -v MigratorName="$(jq -r .migrator_identity_name.value <<<"$OUT")" \
+                 -v MigratorClientId="$(jq -r .migrator_client_id.value <<<"$OUT")" \
+                 -i ../../sql/grant-app-identities.sql

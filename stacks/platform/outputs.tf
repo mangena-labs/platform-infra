@@ -1,0 +1,24 @@
+# stacks/platform/outputs.tf: read by the add-ons stack, the GitHub stack and the pipeline
+output "environment" { value = var.environment }
+output "subscription_id" { value = var.subscription_id }
+output "tenant_id" { value = var.tenant_id }
+output "resource_group_name" { value = azurerm_resource_group.main.name }
+output "aks_name" { value = module.aks.name }
+output "aks_id" { value = module.aks.id }
+output "key_vault_uri" { value = module.keyvault.uri }
+output "sql_server_name" { value = module.sql.server_name }
+output "sql_server_fqdn" { value = module.sql.server_fqdn }
+output "sql_database_name" { value = module.sql.database_name }
+output "api_identity_name" { value = module.id_api.name }
+output "api_client_id" { value = module.id_api.client_id }
+output "migrator_identity_name" { value = module.id_migrator.name }
+output "migrator_client_id" { value = module.id_migrator.client_id }
+output "cert_manager_client_id" { value = module.id_cert_manager.client_id }
+output "api_host" { value = local.front_door ? module.edge[0].api_fqdn : local.api_fqdn }
+output "origin_host" { value = local.front_door ? module.edge[0].origin_fqdn : local.api_fqdn } # no Front Door: the gateway serves the public name
+output "gateway_public_ip_name" { value = azurerm_public_ip.gateway.name }
+output "frontdoor_id" { value = local.shared.frontdoor_id } # "" without Front Door
+output "front_door_enabled" { value = local.front_door }
+output "dns_zone_name" { value = local.shared.dns_zone_name }
+output "dns_resource_group" { value = local.shared.dns_resource_group_name }
+output "shared_subscription_id" { value = var.shared_subscription_id }

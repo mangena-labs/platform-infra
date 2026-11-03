@@ -1,0 +1,12 @@
+{
+    "recommendations": [
+        "hashicorp.terraform",
+        "ms-dotnettools.csdevkit",
+        "ms-azuretools.vscode-docker",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "redhat.vscode-yaml",
+        "github.vscode-github-actions",
+        "ms-azuretools.vscode-azureresourcegroups",
+        "editorconfig.editorconfig"
+    ]
+}

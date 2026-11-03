@@ -1,0 +1,11 @@
+# .github/dependabot.yml (platform-infra)
+version: 2
+updates:
+  - package-ecosystem: terraform
+    directories: ["/stacks/*", "/modules/*"]
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

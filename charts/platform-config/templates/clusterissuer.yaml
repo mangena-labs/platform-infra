@@ -1,0 +1,20 @@
+# templates/clusterissuer.yaml: how certificates are obtained
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: {{ .Values.acme.server }}
+    email: {{ .Values.acme.email | quote }}
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - dns01:                                   # prove ownership with a DNS TXT record
+          azureDNS:
+            hostedZoneName: {{ .Values.dns.zoneName | quote }}
+            resourceGroupName: {{ .Values.dns.resourceGroup | quote }}
+            subscriptionID: {{ .Values.dns.subscriptionId | quote }}
+            environment: AzurePublicCloud
+            managedIdentity:
+              clientID: {{ .Values.certManager.clientId | quote }}   # Workload Identity, no secret

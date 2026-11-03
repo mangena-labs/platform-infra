@@ -1,0 +1,6 @@
+# Chart.yaml
+apiVersion: v2
+name: platform-config
+description: Shared Gateway, certificate issuer and app namespaces for one cluster
+type: application
+version: 1.0.0

@@ -1,0 +1,26 @@
+# templates/gateway.yaml: the shared entrance (owned by the platform team)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt   # cert-manager gets the certificate for this listener
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: {{ .Values.originHost | quote }}   # origin-prod.mangena.online
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: origin-tls                    # created and renewed by cert-manager
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway-access: "true"            # only namespaces the platform team has approved
