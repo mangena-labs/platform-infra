@@ -110,6 +110,7 @@ for ENV in "${ENVS[@]}"; do
   ENV_SCOPE="/subscriptions/${ENV_SUB[$ENV]}"
   P=$(mi_principal "id-gh-infra-plan-$ENV")
   grant "$P" "Reader" "$ENV_SCOPE";  grant "$P" "Reader" "$SHARED_SCOPE"
+  grant "$P" "Azure Kubernetes Service Cluster User Role" "$ENV_SCOPE"   # plans read the cluster's kubeconfig (no Kubernetes access by itself)
   grant "$P" "Storage Blob Data Contributor" "$STATE_ID"
   P=$(mi_principal "id-gh-infra-apply-$ENV")
   grant "$P" "Contributor" "$ENV_SCOPE"
