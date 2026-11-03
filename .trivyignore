@@ -1,3 +1,13 @@
 # .trivyignore: findings we accept on purpose. One ID per line, each with a comment saying why.
 # Learning profile: add IDs reported by the validate job here with the reason
 # "learning profile: Entra-only public endpoint" (Build checklist step 9).
+
+# learning profile: Entra-only public endpoint. GitHub's standard runners have no fixed IP,
+# so the AKS API can't be limited by IP; access still needs an Entra login + Azure role.
+# Full design (private_networking = true) makes the API private and removes this.
+AZU-0041
+
+# learning profile: Entra-only public endpoint. The pipeline writes secrets from GitHub's
+# runners; every request still needs an Entra login + a Key Vault role.
+# Full design (private_networking = true) sets default_action = "Deny" and removes this.
+AZU-0013
