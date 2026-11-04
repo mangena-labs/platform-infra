@@ -187,11 +187,17 @@ jobs:
             trap 'az sql server firewall-rule delete -g "$RG" -s "$SRV" -n "$RULE" -o none' EXIT
             sleep 30                                      # firewall changes take a few seconds to apply
           fi
+          # ActiveDirectoryAzCli = use the az login above ("Default" can pick the runner VM's own identity and fail).
+          # Serverless databases pause when idle; the first login wakes them (~1 min), so retry.
+          for attempt in 1 2 3 4 5 6; do
           sqlcmd -S "$(jq -r .sql_server_fqdn.value <<<"$OUT")" \
                  -d "$(jq -r .sql_database_name.value <<<"$OUT")" \
-                 --authentication-method ActiveDirectoryDefault \
+                 --authentication-method ActiveDirectoryAzCli \
                  -v ApiName="$(jq -r .api_identity_name.value <<<"$OUT")" \
                  -v ApiClientId="$(jq -r .api_client_id.value <<<"$OUT")" \
                  -v MigratorName="$(jq -r .migrator_identity_name.value <<<"$OUT")" \
                  -v MigratorClientId="$(jq -r .migrator_client_id.value <<<"$OUT")" \
-                 -i ../../sql/grant-app-identities.sql
+                 -i ../../sql/grant-app-identities.sql && break
+            [[ $attempt == 6 ]] && exit 1
+            echo "Database not available yet (attempt $attempt of 6); retrying in 30s"; sleep 30
+          done
